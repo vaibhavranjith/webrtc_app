@@ -2,7 +2,7 @@ import './App.css';
 import { io } from 'socket.io-client';
 import { v4 as uuidv4 } from 'uuid';
 import { useEffect, createRef } from 'react';
-const socket = io("https://58a7-3-110-41-87.ngrok.io")
+const socket = io("https://0ed3-3-110-41-87.ngrok.io")
 
 function App() {
   var userId = uuidv4();
@@ -47,6 +47,7 @@ function App() {
           // If you get an offer, you need to reply with an answer.
           console.log("Reply for RTC connection recieved");
           if (desc.type === 'offer') {
+            console.log("Offer Made")
             await pc.setRemoteDescription(desc);
             while(queue.length!=0){
               pc.addIceCandidate(queue.shift());
@@ -56,8 +57,10 @@ function App() {
             stream.getTracks().forEach((track) =>
               pc.addTrack(track, stream));
             await pc.setLocalDescription(await pc.createAnswer());
-            socket.emit({ desc: pc.localDescription });
+            console.log(pc.localDescription)
+            socket.emit('message', { desc: pc.localDescription,"roomId": roomName});
           } else if (desc.type === 'answer') {
+            console.log("Answered")
             await pc.setRemoteDescription(desc);
           } else {
             console.log('Unsupported SDP type.');
@@ -66,7 +69,6 @@ function App() {
           if (!pc || !pc.remoteDescription) {
             queue.push(candidate);
           } else {
-            console.log(candidate);
             await pc.addIceCandidate(candidate);
           }
         }
@@ -74,6 +76,11 @@ function App() {
         console.error(err);
       }
     })
+    pc.ontrack = (event) => {
+      if (remoteView.current.srcObject || !pc.remoteDescription) return;
+      console.log("Remote Stream: ",event.streams)
+      remoteView.current.srcObject = event.streams[0];
+    }
     return () => {
       socket.emit("unsubscribe", roomName)
     }
@@ -81,25 +88,28 @@ function App() {
   async function start() {
     try {
       // Get local stream, show it in self-view, and add it to be sent.
-      const stream =
-        await navigator.mediaDevices.getUserMedia(constraints);
+      var stream =
+        await navigator.mediaDevices.getUserMedia({
+          audio:false,
+          video:true
+        });
       stream.getTracks().forEach((track) =>
         pc.addTrack(track, stream));
-      console.log(stream);
+      console.log("My Stream: ",stream);
+      // stream =
+      //   await navigator.mediaDevices.getUserMedia({
+      //     audio: false,
+      //     video: true
+      //   });
       selfView.current.srcObject = stream;
     } catch (err) {
       console.error(err);
     }
   }
-  pc.ontrack = (event) => {
-    if (remoteView.current.srcObject || !pc.remoteDescription) return;
-    console.log(event.streams[0])
-    remoteView.current.srcObject = event.streams[0];
-  }
   return (<>
     <h2>In progress</h2>
-    <video autoPlay ref={remoteView}></video>
-    <video autoPlay ref={selfView}></video>
+    <video autoPlay playsInline ref={remoteView}></video>
+    <video autoPlay playsInline ref={selfView}></video>
     <button onClick={start}>Start</button>
   </>)
 }
