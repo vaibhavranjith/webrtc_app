@@ -2,7 +2,7 @@ import './App.css';
 import { io } from 'socket.io-client';
 import { v4 as uuidv4 } from 'uuid';
 import { useEffect, createRef } from 'react';
-const socket = io("https://0ed3-3-110-41-87.ngrok.io")
+const socket = io("http://3.110.41.87:3001/")
 
 function App() {
   var userId = uuidv4();
@@ -22,11 +22,21 @@ function App() {
     ]
   };
   var pc = new RTCPeerConnection(configuration);
+  var dataChannel= pc.createDataChannel("Local channel");
   useEffect(() => {
     socket.on('log', (log) => {
       console.log(log)
     })
     socket.emit('create or join', roomName);
+    pc.ondatachannel = function (event) {
+      var channel = event.channel;
+      channel.onopen = function (event) {
+        channel.send('Hi back!')
+      }
+      channel.onmessage = function (event) {
+        console.log(event.data);
+      }
+    }
     pc.onicecandidate = ({ candidate }) => socket.emit('message', { candidate, "roomId": roomName, });
     pc.onnegotiationneeded = async () => {
       try {
@@ -49,13 +59,16 @@ function App() {
           if (desc.type === 'offer') {
             console.log("Offer Made")
             await pc.setRemoteDescription(desc);
-            while(queue.length!=0){
+            while(queue.length!=0)
               pc.addIceCandidate(queue.shift());
+            dataChannel.onopen = function (event) {
+              console.log("local data channel opened")
+              dataChannel.send('Hi you!');
             }
-            const stream =
-              await navigator.mediaDevices.getUserMedia(constraints);
-            stream.getTracks().forEach((track) =>
-              pc.addTrack(track, stream));
+            dataChannel.onmessage = function (event) {
+              console.log("Got message")
+              console.log(event.data);
+            }
             await pc.setLocalDescription(await pc.createAnswer());
             console.log(pc.localDescription)
             socket.emit('message', { desc: pc.localDescription,"roomId": roomName});
@@ -76,32 +89,13 @@ function App() {
         console.error(err);
       }
     })
-    pc.ontrack = (event) => {
-      if (remoteView.current.srcObject || !pc.remoteDescription) return;
-      console.log("Remote Stream: ",event.streams)
-      remoteView.current.srcObject = event.streams[0];
-    }
     return () => {
       socket.emit("unsubscribe", roomName)
     }
   }, []);
   async function start() {
     try {
-      // Get local stream, show it in self-view, and add it to be sent.
-      var stream =
-        await navigator.mediaDevices.getUserMedia({
-          audio:false,
-          video:true
-        });
-      stream.getTracks().forEach((track) =>
-        pc.addTrack(track, stream));
-      console.log("My Stream: ",stream);
-      // stream =
-      //   await navigator.mediaDevices.getUserMedia({
-      //     audio: false,
-      //     video: true
-      //   });
-      selfView.current.srcObject = stream;
+      pc.onnegotiationneeded();
     } catch (err) {
       console.error(err);
     }
@@ -111,6 +105,7 @@ function App() {
     <video autoPlay playsInline ref={remoteView}></video>
     <video autoPlay playsInline ref={selfView}></video>
     <button onClick={start}>Start</button>
+    <button disabled={dataChannel.readyState} onClick={()=>dataChannel.send("SEND")}>Send Message</button>
   </>)
 }
 
